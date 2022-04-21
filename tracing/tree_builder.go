@@ -7,31 +7,32 @@ import (
 	"time"
 
 	"github.com/99designs/gqlgen/graphql"
+	"github.com/lleadbet/gql-example/tracing/generated"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type TreeBuilder struct {
-	Trace *Trace
+	Trace    *generated.Trace
+	rootNode generated.Trace_Node
+	nodes    map[string]NodeMap // nodes is used to store a pointer map using the node path (e.g. todo[0].id) to itself as well as it's parent
 
-	rootNode Trace_Node
-	nodes    map[string]NodeMap
-
-	stopped   bool
 	startTime *time.Time
+	stopped   bool
 	mu        sync.Mutex
 }
 
 type NodeMap struct {
-	self   *Trace_Node
-	parent *Trace_Node
+	self   *generated.Trace_Node
+	parent *generated.Trace_Node
 }
 
+// NewTreeBuilder is used to start the node tree with a default root node, along with the related tree nodes map entry
 func NewTreeBuilder() *TreeBuilder {
 	tb := TreeBuilder{
-		rootNode: Trace_Node{},
+		rootNode: generated.Trace_Node{},
 	}
 
-	t := Trace{
+	t := generated.Trace{
 		Root: &tb.rootNode,
 	}
 	tb.nodes = make(map[string]NodeMap)
@@ -42,6 +43,7 @@ func NewTreeBuilder() *TreeBuilder {
 	return &tb
 }
 
+// StartTimer marks the time using protobuf timestamp format for use in timing calculations
 func (tb *TreeBuilder) StartTimer() {
 	if tb.startTime != nil {
 		fmt.Println(fmt.Errorf("StartTimer called twice"))
@@ -49,25 +51,29 @@ func (tb *TreeBuilder) StartTimer() {
 	if tb.stopped {
 		fmt.Println(fmt.Errorf("StartTimer called after StopTimer"))
 	}
-	ts := time.Now().UTC()
+
+	ts := graphql.Now().UTC()
 	tb.Trace.StartTime = timestamppb.New(ts)
 	tb.startTime = &ts
 }
 
+// StopTimer marks the end of the timer, along with setting the related fields in the protobuf representation
 func (tb *TreeBuilder) StopTimer() {
 	if tb.startTime == nil {
 		fmt.Println(fmt.Errorf("StopTimer called before StartTimer"))
 	}
 	if tb.stopped {
 		fmt.Println(fmt.Errorf("StopTimer called twice"))
-
 	}
-	ts := time.Now().UTC()
+
+	ts := graphql.Now().UTC()
 	tb.Trace.DurationNs = uint64(ts.Sub(*tb.startTime).Nanoseconds())
 	tb.Trace.EndTime = timestamppb.New(ts)
 	tb.stopped = true
 }
 
+// On each field, it calculates the time started at as now - tree.StartTime, as well as a deferred function upon full resolution of the
+// field as now - tree.StartTime; these are used by Apollo to calculate how fields are being resolved in the AST
 func (tb *TreeBuilder) WillResolveField(ctx context.Context) {
 	if tb.startTime == nil {
 		fmt.Println(fmt.Errorf("WillResolveField called before StartTimer"))
@@ -92,40 +98,45 @@ func (tb *TreeBuilder) WillResolveField(ctx context.Context) {
 
 }
 
-func (tb *TreeBuilder) newNode(path *graphql.FieldContext) *Trace_Node {
+// newNode is called on each new node within the AST and sets related values such as the entry in the tree.node map and ID attribute
+func (tb *TreeBuilder) newNode(path *graphql.FieldContext) *generated.Trace_Node {
+	// if the path is empty, it is the root node of the operation
 	if path.Path().String() == "" {
 		return &tb.rootNode
 	}
 
-	self := &Trace_Node{}
+	self := &generated.Trace_Node{}
 	pn := tb.ensureParentNode(path)
 
 	if path.Index != nil {
-		self.Id = &Trace_Node_Index{Index: uint32(*path.Index)}
+		self.Id = &generated.Trace_Node_Index{Index: uint32(*path.Index)}
 	} else {
-		self.Id = &Trace_Node_ResponseName{ResponseName: path.Field.Name}
+		self.Id = &generated.Trace_Node_ResponseName{ResponseName: path.Field.Name}
 	}
 
-	// lock the map from being read concurrently to avoid panics
+	// lock the map from being read/written concurrently to avoid panics
 	tb.mu.Lock()
 	nodeRef := tb.nodes[path.Path().String()]
+	// set the values for the node references to help build the tree
 	nodeRef.parent = pn
 	nodeRef.self = self
 
+	// since they are references, we point the parent to it's children nodes
 	nodeRef.parent.Child = append(nodeRef.parent.Child, self)
 	nodeRef.self = self
 	tb.nodes[path.Path().String()] = nodeRef
-	//once finisehd writing, unlock
 	tb.mu.Unlock()
+
 	return self
 }
 
-func (tb *TreeBuilder) ensureParentNode(path *graphql.FieldContext) *Trace_Node {
-	// lock to read briefly
+// ensureParentNode ensures the node isn't orphaned
+func (tb *TreeBuilder) ensureParentNode(path *graphql.FieldContext) *generated.Trace_Node {
+	// lock to read briefly, then unlock to avoid r/w issues
 	tb.mu.Lock()
 	nodeRef := tb.nodes[path.Parent.Path().String()]
-	// unlock
 	tb.mu.Unlock()
+
 	if nodeRef.self != nil {
 		return nodeRef.self
 	}

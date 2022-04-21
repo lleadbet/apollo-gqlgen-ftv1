@@ -6,7 +6,6 @@ import (
 	"os"
 
 	"github.com/99designs/gqlgen/graphql/handler"
-	"github.com/99designs/gqlgen/graphql/handler/apollotracing"
 	"github.com/99designs/gqlgen/graphql/playground"
 	"github.com/lleadbet/gql-example/graph"
 	"github.com/lleadbet/gql-example/graph/generated"
@@ -22,13 +21,10 @@ func main() {
 	}
 
 	srv := handler.NewDefaultServer(generated.NewExecutableSchema(generated.Config{Resolvers: &graph.Resolver{}}))
-	srv.Use(&trace.Tracer{
-		ClientName: "1234",
-		Version:    "v0.0.1",
-	})
-	srv.Use(apollotracing.Tracer{})
+	srv.Use(&trace.Tracer{})
+
 	http.Handle("/", playground.Handler("GraphQL playground", "/query"))
-	http.Handle("/query", srv)
+	http.Handle("/query", trace.HeadersToContextMiddleware(srv))
 
 	log.Printf("connect to http://localhost:%s/ for GraphQL playground", port)
 	log.Fatal(http.ListenAndServe(":"+port, nil))
