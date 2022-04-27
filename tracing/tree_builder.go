@@ -86,9 +86,9 @@ func (tb *TreeBuilder) WillResolveField(ctx context.Context) {
 	fc := graphql.GetFieldContext(ctx)
 
 	node := tb.newNode(fc)
-	node.StartTime = uint64(time.Since(*tb.startTime).Nanoseconds())
+	node.StartTime = uint64(graphql.Now().Sub(*tb.startTime).Nanoseconds())
 	defer func() {
-		node.EndTime = uint64(time.Since(*tb.startTime).Nanoseconds())
+		node.EndTime = uint64(graphql.Now().Sub(*tb.startTime).Nanoseconds())
 	}()
 
 	node.Type = fc.Field.Definition.Type.String()
