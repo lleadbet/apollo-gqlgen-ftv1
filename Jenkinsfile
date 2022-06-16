@@ -1,10 +1,23 @@
 pipeline {
-  agent any
+  agent {
+    dockerfile {
+      filename 'golang:1.17.5-alpine'
+    }
+
+  }
   stages {
-    stage('Rover Check') {
+    stage('Rover Install') {
       steps {
-        sh '''RESULTS = "echo potato"
-'''
+        retry(count: 2) {
+          sh 'curl -sSL https://rover.apollo.dev/nix/latest | sh'
+        }
+
+      }
+    }
+
+    stage('Rover Checks') {
+      steps {
+        sh 'rover --help'
       }
     }
 
