@@ -9,7 +9,9 @@ pipeline {
     stage('Rover Install') {
       steps {
         retry(count: 2) {
-          sh '''apt-get update && apt-get install. -y curl
+          sh '''apk add --update \\
+    curl \\
+    && rm -rf /var/cache/apk/*
 curl -sSL https://rover.apollo.dev/nix/latest | sh'''
         }
 
