@@ -9,7 +9,8 @@ pipeline {
     stage('Rover Install') {
       steps {
         retry(count: 2) {
-          sh 'curl -sSL https://rover.apollo.dev/nix/latest | sh'
+          sh '''apt-get update && apt-get install. -y curl
+curl -sSL https://rover.apollo.dev/nix/latest | sh'''
         }
 
       }
